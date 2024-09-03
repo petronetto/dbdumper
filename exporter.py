@@ -42,29 +42,36 @@ def wait_for_port(port: int, host: str = 'localhost', timeout: float = 60.0) -> 
 @click.option('--pgport', default=DEFAULT_PGPORT, help='PostgreSQL port')
 @click.option('--pguser', default=DEFAULT_PGUSER, help='PostgreSQL user')
 @click.option('--pgpassword', default=DEFAULT_PGPASSWORD, help='PostgreSQL password')
-def cli(dumpfile: Optional[str], dbname: str, pghost: str, pgport: str, pguser: str, pgpassword: str):
+@click.option('--tunnel', is_flag=True, help='Establish an SSH tunnel for database connection')
+def cli(dumpfile: Optional[str], dbname: str, pghost: str, pgport: str, pguser: str, pgpassword: str, tunnel: bool):
     if dumpfile is None:
         dumpfile = f"{dbname}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.dump"
     else:
         dumpfile += ".dump"
 
-    ssh_command: str = (
-        f"ssh -L {DEFAULT_SSH_LOCAL_PORT}:{pghost}:{pgport} "
-        f"-N -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no "
-        f"{DEFAULT_SSH_REMOTE_USER}@{DEFAULT_SSH_REMOTE_HOST}"
-    )
+    ssh_proc = None
 
-    ssh_proc = subprocess.Popen(ssh_command, shell=True)
-    console.print(f"[green]SSH tunnel established with PID[/] [blue]{ssh_proc.pid}")
+    if tunnel:
+        ssh_command: str = (
+            f"ssh -L {DEFAULT_SSH_LOCAL_PORT}:{pghost}:{pgport} "
+            f"-N -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no "
+            f"{DEFAULT_SSH_REMOTE_USER}@{DEFAULT_SSH_REMOTE_HOST}"
+        )
 
-    if not wait_for_port(int(DEFAULT_SSH_LOCAL_PORT)):
-        console.print("[green]Failed to establish a connection through the SSH tunnel.")
-        ssh_proc.terminate()
-        return
+        ssh_proc = subprocess.Popen(ssh_command, shell=True)
+        console.print(f"[green]SSH tunnel established with PID[/] [blue]{ssh_proc.pid}")
+
+        if not wait_for_port(int(DEFAULT_SSH_LOCAL_PORT)):
+            console.print("[green]Failed to establish a connection through the SSH tunnel.")
+            ssh_proc.terminate()
+            return
+
+        pghost = 'host.docker.internal'  # Change the host to tunnel endpoint
+        pgport = DEFAULT_SSH_LOCAL_PORT
 
     dump_command: str = (
         f"docker run --rm -v $(pwd):/dumps -e PGPASSWORD='{pgpassword}' postgres:{DEFAULT_PGVERSION} "
-        f"pg_dump -h host.docker.internal -p {DEFAULT_SSH_LOCAL_PORT} -U {pguser} "
+        f"pg_dump -h {pghost} -p {pgport} -U {pguser} "
         f"--format=c --blobs --clean --if-exists --create --no-owner --no-privileges --verbose "
         f"-f /dumps/{dumpfile} {dbname}"
     )
@@ -76,9 +83,10 @@ def cli(dumpfile: Optional[str], dbname: str, pghost: str, pgport: str, pguser: 
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Error during database dump: {e}")
     finally:
-        ssh_proc.terminate()
-        ssh_proc.wait()
-        console.print("[green]SSH tunnel closed.")
+        if ssh_proc:
+            ssh_proc.terminate()
+            ssh_proc.wait()
+            console.print("[green]SSH tunnel closed.")
 
 
 if __name__ == '__main__':

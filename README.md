@@ -9,7 +9,7 @@ Then configure the necessary credentials at the .env
 
 ### Export
 ```sh
-python exporter.py --dbname=my-db-name
+python exporter.py --dbname=my-db-name --tunnel
 ```
 
 ### Import
