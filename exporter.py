@@ -43,7 +43,8 @@ def wait_for_port(port: int, host: str = 'localhost', timeout: float = 60.0) -> 
 @click.option('--pguser', default=DEFAULT_PGUSER, help='PostgreSQL user')
 @click.option('--pgpassword', default=DEFAULT_PGPASSWORD, help='PostgreSQL password')
 @click.option('--tunnel', is_flag=True, help='Establish an SSH tunnel for database connection')
-def cli(dumpfile: Optional[str], dbname: str, pghost: str, pgport: str, pguser: str, pgpassword: str, tunnel: bool):
+@click.option('--exclude-tables', help='Comma-separated list of tables to exclude from the dump')
+def cli(dumpfile: Optional[str], dbname: str, pghost: str, pgport: str, pguser: str, pgpassword: str, tunnel: bool, exclude_tables: Optional[str]):
     if dumpfile is None:
         dumpfile = f"{dbname}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.dump"
     else:
@@ -69,10 +70,16 @@ def cli(dumpfile: Optional[str], dbname: str, pghost: str, pgport: str, pguser: 
         pghost = 'host.docker.internal'  # Change the host to tunnel endpoint
         pgport = DEFAULT_SSH_LOCAL_PORT
 
+    exclude_table_options = ""
+    if exclude_tables:
+        tables = exclude_tables.split(',')
+        exclude_table_options = ' '.join(f"--exclude-table={table}" for table in tables)
+
     dump_command: str = (
         f"docker run --rm -v $(pwd):/dumps -e PGPASSWORD='{pgpassword}' postgres:{DEFAULT_PGVERSION} "
         f"pg_dump -h {pghost} -p {pgport} -U {pguser} "
         f"--format=c --blobs --clean --if-exists --create --no-owner --no-privileges --verbose "
+        f"{exclude_table_options} "
         f"-f /dumps/{dumpfile} {dbname}"
     )
 
